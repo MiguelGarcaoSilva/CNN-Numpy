@@ -451,3 +451,82 @@ class Conv2d:
 
     
 
+class FullyConnected:
+    def __init__(self, input_dim, output_dim):
+        self.input_dim = input_dim #(n_x)
+        self.output_dim = output_dim #(n_y)
+        self.W = np.random.randn(self.output_dim, self.input_dim) * 0.01 # shape: (n_y, n_x)
+        self.b = np.zeros((self.output_dim, 1)) # shape: (n_y, 1)
+
+
+    def forward_linear(self, X):
+        '''Forward pass through the
+        linear layer'''
+        Z = np.dot(self.W, X) + self.b
+
+        W , b = self.W.copy(), self.b.copy()
+        linear_cache = (X, W, b)
+        return Z, linear_cache
+
+    def forward_activation(self, Z):
+        '''Forward pass through the
+        activation function'''
+        A = self.softmax(Z)
+        activation_cache = Z
+        return A, activation_cache
+
+    @staticmethod
+    def softmax(X):
+        """Stable Softmax Activation"""
+        exps = np.exp(X - np.max(X, axis=0, keepdims=True))  # Prevent numerical instability
+        return exps / np.sum(exps, axis=0, keepdims=True)
+
+
+    def forward(self, X):
+        """
+        Implement forward propagation for the LINEAR->SOFTMAX computation
+        
+        Arguments:
+        X -- data, numpy array of shape (input size, number of examples)
+        
+        Returns:
+        AL -- activation value from the output (last) layer
+        caches -- list of caches containing:
+                    linear_cache -- tuple of values (A_prev, W, b)
+                    activation_cache -- the activation cache
+        """ 
+        Z, linear_cache = self.forward_linear(X)
+        AL, activation_cache = self.forward_activation(Z)
+
+        return AL, (linear_cache, activation_cache)
+    
+
+
+    def backward(self, AL, Y, caches, learning_rate):
+        """Backward pass through softmax + fully connected layer"""
+
+        m = AL.shape[1]  # Number of examples
+        linear_cache, activation_cache = caches  # Retrieve caches
+
+        X, W, b = linear_cache  # Extract stored values
+        Z = activation_cache  # Z is not used for softmax 
+
+        dAL = AL - Y  # Gradient of loss w.r.t softmax output
+        dW = np.dot(dAL, X.T) / m  # Gradient of weights 
+        db = np.sum(dAL, axis=1, keepdims=True) / m  # Gradient of biases
+        dX = np.dot(W.T, dAL)  # Gradient for previous layer
+
+        # Update parameters
+        self.W -= learning_rate * dW
+        self.b -= learning_rate * db
+
+        return dX
+
+
+    def compute_cost(self, AL, Y):
+        '''Compute the cross-entropy cost'''
+        m = Y.shape[1]
+        cost = -np.sum(Y * np.log(AL + 1e-9)) / m
+        return cost
+
+
