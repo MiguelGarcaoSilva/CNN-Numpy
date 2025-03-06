@@ -39,25 +39,10 @@ class ConvNet2D:
         self.fc_weights -= learning_rate * grads['dW_fc']
         self.fc_biases -= learning_rate * grads['db_fc']
 
-    @staticmethod
-    def sigmoid(self, X):
-        """Sigmoid activation function"""
-        return 1 / (1 + np.exp(-X))
 
     def forward(self, X):
         """Forward pass through the CNN"""
-        for i in range(len(self.conv_layers)):
-            X = self.conv_layers[i].forward(X)
-            if len(self.pooling_layers) > i:
-                X = self.pooling_layers[i].forward(X)
-
-        # Flatten the output for the fully connected layer
-        X = X.reshape(X.shape[0], -1)
-
-        # Fully connected forward pass
-        X = np.dot(X, self.fc_weights) + self.fc_biases
-        X = self.sigmoid(X)
-        return X
+        pass
 
 
     def fit(self, X, Y, learning_rate=0.01, n_iters=1000, seed=0):
@@ -83,7 +68,10 @@ class ConvNet2D:
 
 
     def compute_cost(self, AL, Y):
-        pass
+        '''Compute the cross-entropy cost'''
+        m = Y.shape[1]
+        cost = -np.sum(Y * np.log(AL + 1e-9)) / m
+        return cost
 
 
     def fit(self, X, Y, optimizer, learning_rate, n_iters, seed=0):
@@ -118,6 +106,197 @@ class ConvNet2D:
 
         return self.parameters, costs
 
+class Conv2d:
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding_mode='zeros', padding=0):
+        """
+        Applies a 2D convolution over an input signal composed of several input planes.
+
+        Arguments:
+        in_channels -- Number of channels in the input image
+        out_channels -- Number of channels produced by the convolution
+        kernel_size -- Size of the convolving kernel
+        stride -- Stride of the convolution. Default: 1
+        padding_mode -- Padding mode. Default: 'zeros'
+        padding -- Zero-padding added to both sides of the input. Default: 0
+        
+        """
+
+        self.in_channels = in_channels
+        self.kernel_size = kernel_size
+        self.n_filters = out_channels
+        self.hparameters = {"stride": stride, "pad": padding}
+        # each filter fxf with n_C_prev channels will produce one output channel
+        self.W = np.random.randn(kernel_size, kernel_size, in_channels, out_channels)  # (f, f, n_C_prev, n_C) 
+        # each filter will have one bias
+        self.b = np.random.randn(1, 1, 1, out_channels)  # (1, 1, 1, n_C)
+
+    def zero_pad(self, X):
+        """
+        Pad with zeros all 2D data of the dataset X. The padding is applied to both dimensions
+
+        Arguments:
+        X -- python numpy array of shape (m, n_H, n_W, n_C) representing a batch of m 2D objects
+        pad -- integer, amount of padding around each object on both dimensions
+
+        Returns:
+        X_pad -- padded object of shape (m, n_H + 2*pad, n_W + 2*pad, n_C)
+        """
+        return np.pad(X, ((0, 0), (self.hparameters["pad"], self.hparameters["pad"]), (self.hparameters["pad"], self.hparameters["pad"]), (0, 0)), 'constant', constant_values=(0, 0))
+
+    def conv_single_step(self, slice, W, b):
+        """
+        Apply one filter defined by parameters W on a single slice (slice) of the output activation of the previous layer.
+
+        Arguments:
+        slice -- slice of input data of shape (f, f, n_C_prev)
+        W -- Weight parameters contained in a window - matrix of shape (f, f, n_C_prev)
+        b -- Bias parameters contained in a window - matrix of shape (1, 1, 1)
+
+        Returns:
+        Z -- a scalar value, result of convolving the sliding window (W, b) on a slice x of the input data
+        """
+        return np.sum(np.multiply(slice, W) + b)
+
+
+    def forward(self, A_prev):
+        """
+        Implements the forward propagation for a convolution function
+        
+        Arguments:
+        A_prev -- output activations of the previous layer (m, n_H_prev, n_W_prev, n_C_prev)
+        W -- Weights, numpy array of shape (f, f, n_C_prev, n_C)
+        b -- Biases, numpy array of shape (1, 1, 1, n_C)
+        hparameters -- python dictionary containing "stride" and "pad"
+            
+        Returns:
+        A -- conv output, numpy array of shape (m, n_H, n_W, n_C)
+        cache -- cache of values needed for the conv_backward() function
+        """
+        
+        # Retrieve dimensions from A_prev's shape
+        (m, n_H_prev, n_W_prev, n_C_prev) = A_prev.shape
+
+        # Retrieve dimensions from W's shape
+        (f, f, n_C_prev, n_C) = self.W.shape
+
+        stride = self.hparameters["stride"]
+        pad = self.hparameters["pad"]
+
+        # Compute the dimensions of the CONV output volume using the formula. 
+        n_H = int(np.floor((n_H_prev - f + 2 * pad) / stride) + 1)
+        n_W = int(np.floor((n_W_prev - f + 2 * pad) / stride) + 1)
+
+        # Initialize the output volume A (Z after activation) and Z with zeros
+        Z = np.zeros((m, n_H, n_W, n_C))
+        A = np.zeros((m, n_H, n_W, n_C))
+
+        # Padding the A_prev
+        A_prev_pad = self.zero_pad(A_prev)
+
+        for i in range(m):               # loop training examples
+            A_prev_pad_i = A_prev_pad[i]     
+            for h in range(n_H):           # loop over vertical axis of the output volume
+                #Find the vertical start and end of the current "slice"
+                vert_start = h * stride
+                vert_end = vert_start + f
+
+                for w in range(n_W):       # loop over horizontal axis of the output volume
+                    #Find the horizontal start and end of the current "slice"
+                    horiz_start = w * stride
+                    horiz_end = horiz_start + f
+
+                    for c in range(n_C):   # loop over channels (= #filters) of the output volume
+
+                        #Get the 3d slice of the example i at the current position (h, w)
+                        a_slice_prev = A_prev_pad_i[vert_start:vert_end, horiz_start:horiz_end, :]
+
+                        #Convolve the (3D) slice with the correct filter W and bias b, to get back one output neuron.
+                        weights = self.W[:,:,:,c]       #(f, f, n_C_prev)
+                        biases = self.b[:,:,:,c]        #(1, 1, 1)
+                        Z[i, h, w, c] = self.conv_single_step(a_slice_prev, weights, biases)
+                        # Activation
+                        A[i, h, w, c] = ReLU(Z[i, h, w, c])
+
+
+        # Save information in "cache" for the backprop
+        conv_cache = (A_prev, self.W.copy(), self.b.copy(), self.hparameters.copy())
+        activation_cache = Z
+
+        return A, (conv_cache, activation_cache)
+
+    @staticmethod
+    def ReLU(Z):
+        """ReLU activation function"""
+        return np.maximum(0, Z)
+
+    def backward(self, dA, cache):
+        """
+        Implement the backward propagation for a convolution function
+        
+        Arguments:
+        dA -- gradient of the cost with respect to the output of the conv layer (A), numpy array of shape (m, n_H, n_W, n_C)
+        cache -- cache of values needed for the conv_backward(), output of forward()
+        
+        Returns:
+        dA_prev -- gradient of the cost with respect to the input of the conv layer (A_prev),
+                numpy array of shape (m, n_H_prev, n_W_prev, n_C_prev)
+        dW -- gradient of the cost with respect to the weights of the conv layer (W)
+            numpy array of shape (f, f, n_C_prev, n_C)
+        db -- gradient of the cost with respect to the biases of the conv layer (b)
+            numpy array of shape (1, 1, 1, n_C)
+        """    
+        
+        (A_prev, W, b, hparameters) = cache         # Retrieve information from cache
+        (m, n_H_prev, n_W_prev, n_C_prev) = A_prev.shape         # Retrieve dimensions from A_prev's shape
+        (f, f, n_C_prev, n_C) = W.shape         # Retrieve dimensions from W's shape
+        
+        stride = hparameters["stride"]
+        pad = hparameters["pad"]
+        
+        (m, n_H, n_W, n_C) = dA.shape  # Retrieve dimensions from dA's shape
+
+        # Initialize dA_prev, dW, db 
+        dA_prev = np.zeros((m, n_H_prev, n_W_prev, n_C_prev))                         
+        dW = np.zeros((f, f, n_C_prev, n_C)) 
+        db = np.zeros((1, 1, 1, n_C)) 
+        
+        # Pad A_prev and dA_prev
+        A_prev_pad = self.zero_pad(A_prev, pad)
+        dA_prev_pad = self.zero_pad(dA_prev, pad)
+        
+        for i in range(m):  # loop over the training examples
+            
+            #ith example from A_prev_pad and dA_prev_pad
+            a_prev_pad_i = A_prev_pad[i]
+            da_prev_pad_i = dA_prev_pad[i]
+            
+            for h in range(n_H):                   # loop over vertical axis of the output volume
+                vert_start = h * stride
+                vert_end = h * stride + f
+                for w in range(n_W):               # loop over horizontal axis of the output volume
+                    horiz_start = w * stride
+                    horiz_end = w * stride + f
+                    for c in range(n_C):           # loop over the channels of the output volume
+                        
+                        #define the slice from a_prev_pad
+                        a_slice = a_prev_pad_i[vert_start:vert_end, horiz_start:horiz_end, :]
+
+                        #Update gradients for the window and the filter's parameters
+
+                        #formula for computing 𝑑𝐴 with respect to the cost for a certain filter 𝑊𝑐 and a given training example
+                        da_prev_pad_i[vert_start:vert_end, horiz_start:horiz_end, :] += W[:,:,:,c] * dA[i, h, w, c] 
+                        dW[:,:,:,c] += a_slice * dA[i, h, w, c]  #formula for computing dw (derivative of one filter 𝑊𝑐 with respect to loss)
+                        db[:,:,:,c] += dA[i, h, w, c] #formula for computing db (derivative of one filter 𝑊𝑐 with respect to loss)
+                        
+            #Set the ith training example's dA_prev to the unpadded da_prev_pad
+            if pad == 0:
+                dA_prev[i, :, :, :] = da_prev_pad_i
+            else:  
+                dA_prev[i, :, :, :] = da_prev_pad_i[pad:-pad, pad:-pad, :]
+        
+        return dA_prev, dW, db
+
 
 class Pooling:
 
@@ -128,14 +307,14 @@ class Pooling:
 
         assert self.mode in ['max', 'average']
     
-    def forward(self, input):
+    def forward(self, A_prev):
         """
         Implements the forward pass of the pooling layer
         
         Arguments:
         A_prev -- Input data, numpy array of shape (m, n_H_prev, n_W_prev, n_C_prev)
         hparameters -- python dictionary containing "f" and "stride"
-        mode -- the pooling mode you would like to use, defined as a string ("max" or "average")
+        mode -- the pooling mode defined as a string ("max" or "average")
         
         Returns:
         A -- output of the pool layer, a numpy array of shape (m, n_H, n_W, n_C)
@@ -162,33 +341,27 @@ class Pooling:
                 #Find the vertical start and end of the current "slice"
                 vert_start = h*stride
                 vert_end = h*stride + f
-                
-                for w in range(n_W):                 # loop on the horizontal axis of the output volume
-                    #Find the vertical start and end of the current "slice"
+                for w in range(n_W):                 # loop on the horizontal axis
+                    #Find the horizontal start and end of the current "slice"
                     horiz_start = w*stride
                     horiz_end = w*stride + f
-                    
-                    for c in range (n_C):            # loop over the channels of the output volume
-                        
-                        #Use the corners to define the current slice on the ith training example of A_prev, channel c
+                    for c in range (n_C):            # loop over the channels 
+                        # Get current slide on the ith training example of A_prev, channel c
                         a_prev_slice = A_prev[i, vert_start:vert_end, horiz_start:horiz_end, c]  
                         
                         #Compute the pooling operation on the slice. 
-                        if mode == "max":
+                        if self.mode == "max":
                             A[i, h, w, c] = np.max(a_prev_slice)
-                        elif mode == "average":
+                        elif self.mode == "average":
                             A[i, h, w, c] = np.mean(a_prev_slice)
         
         
         # Store the input and hparameters in "cache" for pool_backward()
-        cache = (A_prev, hparameters)
-        
-        # Making sure your output shape is correct
-        assert(A.shape == (m, n_H, n_W, n_C))
+        cache = (A_prev, self.hparameters.copy())
         
         return A, cache
 
-    def backward(dA, cache):
+    def backward(self, dA, cache):
         """
         Implements the backward pass of the pooling layer
         
@@ -218,15 +391,13 @@ class Pooling:
             a_prev_i = A_prev[i] #training example from A_prev 
             
             for h in range(n_H):                   # loop on the vertical axis
+                vert_start = h*stride
+                vert_end = h*stride + f
                 for w in range(n_W):               # loop on the horizontal axis
+                    horiz_start = w*stride
+                    horiz_end = w*stride + f
                     for c in range(n_C):           # loop over the channels (depth)
-            
-                        #Find the corners of the current "slice"
-                        vert_start = h*stride
-                        vert_end = h*stride + f
-                        horiz_start = w*stride
-                        horiz_end = w*stride + f
-                        
+
                         #Compute the backward propagation in both modes.
                         if self.mode == "max":
                             
@@ -253,202 +424,8 @@ class Pooling:
                             #The gradient is evenly distributed across all elements in the pooling region.
                             average = da / (f * f)
                             dA_prev[i, vert_start: vert_end, horiz_start: horiz_end, c] += np.full((f, f), average)
-
-        
-        # Making sure your output shape is correct
-        assert(dA_prev.shape == A_prev.shape)
         
         return dA_prev
-
-
-class Conv2d:
-
-    def __init__(in_channels, out_channels, kernel_size, stride=1, padding_mode='zeros'):
-        """
-        Applies a 2D convolution over an input signal composed of several input planes.
-
-        Arguments:
-        in_channels -- Number of channels in the input image
-        out_channels -- Number of channels produced by the convolution
-        kernel_size -- Size of the convolving kernel
-        stride -- Stride of the convolution. Default: 1
-        padding_mode -- Padding mode. Default: 'zeros'
-        
-        """
-
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.kernel_size = kernel_size
-        self.n_filters
-        self.hparameters = {"stride": stride, "pad": padding}
-        self.W = np.random.randn(self.kernel_size, self.n_filters) * 0.01 
-        self.b = np.random.randn(self.n_filters, 1)
-
-
-    def zero_pad(self, X):
-        """
-        Pad with zeros all 2D data of the dataset X. The padding is applied to both dimensions
-
-        Arguments:
-        X -- python numpy array of shape (m, n_H, n_W, n_C) representing a batch of m 2D objects
-        pad -- integer, amount of padding around each object on both dimensions
-
-        Returns:
-        X_pad -- padded object of shape (m, n_H + 2*pad, n_W + 2*pad, n_C)
-        """
-        return np.pad(X, ((0, 0), (self.pad, self.pad), (self.pad, self.pad), (0, 0)), 'constant', constant_values=(0, 0))
-
-    def conv_single_step(self, slice):
-        """
-        Apply one filter defined by parameters W on a single slice (slice) of the output activation of the previous layer.
-
-        Arguments:
-        slice -- slice of input data of shape (f, f, n_C_prev)
-        W -- Weight parameters contained in a window - matrix of shape (f, f, n_C_prev)
-        b -- Bias parameters contained in a window - matrix of shape (1, 1, 1)
-
-        Returns:
-        Z -- a scalar value, result of convolving the sliding window (W, b) on a slice x of the input data
-        """
-        return np.sum(np.multiply(slice, self.W) + self.b)
-
-
-    def forward(A_prev):
-        """
-        Implements the forward propagation for a convolution function
-        
-        Arguments:
-        A_prev -- output activations of the previous layer, 
-            numpy array of shape (m, n_H_prev, n_W_prev, n_C_prev)
-        W -- Weights, numpy array of shape (f, f, n_C_prev, n_C)
-        b -- Biases, numpy array of shape (1, 1, 1, n_C)
-        hparameters -- python dictionary containing "stride" and "pad"
-            
-        Returns:
-        Z -- conv output, numpy array of shape (m, n_H, n_W, n_C)
-        cache -- cache of values needed for the conv_backward() function
-        """
-        
-        # Retrieve dimensions from A_prev's shape
-        (m, n_H_prev, n_W_prev, n_C_prev) = A_prev.shape
-
-        # Retrieve dimensions from W's shape (≈1 line)
-        (f, f, n_C_prev, n_C) = W.shape
-
-
-        stride = self.hparameters["stride"]
-        pad = self.hparameters["pad"]
-
-        # Compute the dimensions of the CONV output volume using the formula. 
-        n_H = int(np.floor((n_H_prev - f + 2 * pad) / stride) + 1)
-        n_W = int(np.floor((n_W_prev - f + 2 * pad) / stride) + 1)
-
-        # Initialize the output volume Z with zeros
-        Z = np.zeros((m, n_H, n_W, n_C))
-
-        # Create A_prev_pad by padding A_prev
-        A_prev_pad = zero_pad(A_prev, pad)
-
-        for i in range(m):               # loop training examples
-            for h in range(n_H):           # loop over vertical axis of the output volume
-                #Find the vertical start and end of the current "slice"
-                vert_start = h * stride
-                vert_end = vert_start + f
-
-                for w in range(n_W):       # loop over horizontal axis of the output volume
-                    #Find the horizontal start and end of the current "slice"
-                    horiz_start = w * stride
-                    horiz_end = horiz_start + f
-
-                    for c in range(n_C):   # loop over channels (= #filters) of the output volume
-
-                        #Use the corners of the training example i to define the (3D) slice of a_prev_pad. 
-                        a_slice_prev = A_prev_pad[i, vert_start:vert_end, horiz_start:horiz_end, :]
-
-                        #Convolve the (3D) slice with the correct filter W and bias b, to get back one output neuron.
-                        weights = W[:,:,:,c]       #(f, f, n_C)
-                        biases = b[:,:,:,c]        #(1, 1, 1)
-                        Z[i, h, w, c] = conv_single_step(a_slice_prev, weights, biases)
-                        # Activation
-                        A[i, h, w, c] = activation_func(Z[i, h, w, c])
-
-
-        # Save information in "cache" for the backprop
-        Z_cache = (A_prev, W, b, hparameters)
-        A_cache = Z
-
-        return A, (linear_cache, activation_cache)
-
-    def backward(dZ, cache):
-        """
-        Implement the backward propagation for a convolution function
-        
-        Arguments:
-        dZ -- gradient of the cost with respect to the output of the conv layer (Z), numpy array of shape (m, n_H, n_W, n_C)
-        cache -- cache of values needed for the conv_backward(), output of conv_forward()
-        
-        Returns:
-        dA_prev -- gradient of the cost with respect to the input of the conv layer (A_prev),
-                numpy array of shape (m, n_H_prev, n_W_prev, n_C_prev)
-        dW -- gradient of the cost with respect to the weights of the conv layer (W)
-            numpy array of shape (f, f, n_C_prev, n_C)
-        db -- gradient of the cost with respect to the biases of the conv layer (b)
-            numpy array of shape (1, 1, 1, n_C)
-        """    
-        
-        (A_prev, W, b, hparameters) = cache         # Retrieve information from "cache"
-        (m, n_H_prev, n_W_prev, n_C_prev) = A_prev.shape         # Retrieve dimensions from A_prev's shape
-        (f, f, n_C_prev, n_C) = W.shape         # Retrieve dimensions from W's shape
-        
-        stride = hparameters["stride"]
-        pad = hparameters["pad"]
-        
-        (m, n_H, n_W, n_C) = dZ.shape  # Retrieve dimensions from dZ's shape
-
-        # Initialize dA_prev, dW, db 
-        dA_prev = np.zeros((m, n_H_prev, n_W_prev, n_C_prev))                         
-        dW = np.zeros((f, f, n_C_prev, n_C)) 
-        db = np.zeros((1, 1, 1, n_C)) 
-        
-        # Pad A_prev and dA_prev
-        A_prev_pad = zero_pad(A_prev, pad)
-        dA_prev_pad = zero_pad(dA_prev, pad)
-        
-        for i in range(m):  # loop over the training examples
-            
-            #select ith training example from A_prev_pad and dA_prev_pad
-            a_prev_pad_i = A_prev_pad[i]
-            da_prev_pad_i = dA_prev_pad[i]
-            
-            for h in range(n_H):                   # loop over vertical axis of the output volume
-               for w in range(n_W):               # loop over horizontal axis of the output volume
-                   for c in range(n_C):           # loop over the channels of the output volume
-                        
-                        #Find the corners of the current "slice"
-                        vert_start = h * stride
-                        vert_end = h * stride + f
-                        horiz_start = w * stride
-                        horiz_end = w * stride + f
-
-                        #Use the corners to define the slice from a_prev_pad
-                        a_slice = a_prev_pad_i[vert_start:vert_end, horiz_start:horiz_end, :]
-
-                        #Update gradients for the window and the filter's parameters
-
-                        #formula for computing  𝑑𝐴 with respect to the cost for a certain filter 𝑊𝑐 and a given training example
-                        da_prev_pad_i[vert_start:vert_end, horiz_start:horiz_end, :] += W[:,:,:,c] * dZ[i, h, w, c] 
-                        dW[:,:,:,c] += a_slice * dZ[i, h, w, c]  #formula for computing dw (derivative of one filter 𝑊𝑐 with respect to loss)
-                        db[:,:,:,c] += dZ[i, h, w, c] #formula for computing db (derivative of one filter 𝑊𝑐 with respect to loss)
-                        
-            #Set the ith training example's dA_prev to the unpadded da_prev_pad
-            dA_prev[i, :, :, :] = da_prev_pad_i[pad:-pad, pad:-pad, :]
-
-        # Making sure output shape is correct
-        assert(dA_prev.shape == (m, n_H_prev, n_W_prev, n_C_prev))
-        
-        return dA_prev, dW, db
-
-
     
 
 class FullyConnected:
@@ -471,9 +448,8 @@ class FullyConnected:
     def forward_activation(self, Z):
         '''Forward pass through the
         activation function'''
-        A = self.softmax(Z)
-        activation_cache = Z
-        return A, activation_cache
+        A = softmax(Z)
+        return A, Z
 
     @staticmethod
     def softmax(X):
@@ -482,12 +458,12 @@ class FullyConnected:
         return exps / np.sum(exps, axis=0, keepdims=True)
 
 
-    def forward(self, X):
+    def forward(self, A_prev):
         """
         Implement forward propagation for the LINEAR->SOFTMAX computation
         
         Arguments:
-        X -- data, numpy array of shape (input size, number of examples)
+        A_prev -- activations from previous layer (or input data): (size of previous layer, number of examples)
         
         Returns:
         AL -- activation value from the output (last) layer
@@ -495,7 +471,7 @@ class FullyConnected:
                     linear_cache -- tuple of values (A_prev, W, b)
                     activation_cache -- the activation cache
         """ 
-        Z, linear_cache = self.forward_linear(X)
+        Z, linear_cache = self.forward_linear(A_prev)
         AL, activation_cache = self.forward_activation(Z)
 
         return AL, (linear_cache, activation_cache)
@@ -503,7 +479,18 @@ class FullyConnected:
 
 
     def backward(self, AL, Y, caches, learning_rate):
-        """Backward pass through softmax + fully connected layer"""
+        """Backward pass through softmax + fully connected layer
+        Arguments:
+        AL -- Probability vector, output of the forward propagation (L_model_forward())
+        Y -- True "label" vector (containing 0 if non-cat, 1 if cat)
+        caches -- list of caches containing:
+                    linear_cache -- tuple of values (A_prev, W, b)
+                    activation_cache -- the activation cache
+        learning_rate -- Learning rate for the model
+
+        Returns:
+        dA_prev -- Gradient of the loss with respect to the input of the fully connected layer
+        """
 
         m = AL.shape[1]  # Number of examples
         linear_cache, activation_cache = caches  # Retrieve caches
@@ -514,19 +501,9 @@ class FullyConnected:
         dAL = AL - Y  # Gradient of loss w.r.t softmax output
         dW = np.dot(dAL, X.T) / m  # Gradient of weights 
         db = np.sum(dAL, axis=1, keepdims=True) / m  # Gradient of biases
-        dX = np.dot(W.T, dAL)  # Gradient for previous layer
+        dA_prev = np.dot(W.T, dAL)  # Gradient for previous layer
 
-        # Update parameters
-        self.W -= learning_rate * dW
-        self.b -= learning_rate * db
+        return dA_prev, dW, db
 
-        return dX
-
-
-    def compute_cost(self, AL, Y):
-        '''Compute the cross-entropy cost'''
-        m = Y.shape[1]
-        cost = -np.sum(Y * np.log(AL + 1e-9)) / m
-        return cost
 
 
