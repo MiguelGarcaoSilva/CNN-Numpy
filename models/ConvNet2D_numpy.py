@@ -541,6 +541,7 @@ class FullyConnected:
 
         self.W_m, self.W_v = np.zeros_like(self.W), np.zeros_like(self.W)
         self.b_m, self.b_v = np.zeros_like(self.b), np.zeros_like(self.b)
+        
     @staticmethod
     def softmax(x):
         '''Softmax activation function with cache'''
