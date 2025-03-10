@@ -1,2 +1,2 @@
-# ConvolutionalNeuralNetworkImplementation
-Implementation of a CNN
+# CNN Numpy
+This repository provides a detailed implementation of a highly customizable Convolutional Neural Network (CNN) classifier using only NumPy. Users can define any number of convolutional layers with flexible options for padding, stride, and max or average pooling layers. The CNN is followed by a fully connected (dense) layer using a softmax activation for classification tasks. This project aims to provide a clear understanding of CNN fundamentals by demonstrating forward propagation, backpropagation, and and parameter optimization with Adam without the use of high-level frameworks.
